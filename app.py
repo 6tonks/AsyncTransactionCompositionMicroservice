@@ -98,6 +98,11 @@ def transaction():
                 AdjustMoneyManagement(input['user_id'], -input["price"] * input["quantity"]),
                 AdjustInvestmentPortfolio(input["user_id"], input["ticker"], input["quantity"])
             ]
+        elif input['transaction_type'] == 'SELL':
+            pipeline = [
+                AdjustMoneyManagement(input['user_id'], input["price"] * input["quantity"]),
+                AdjustInvestmentPortfolio(input["user_id"], input["ticker"], -input["quantity"])
+            ]
 
         res = asyncio.run(execute_pipeline(pipeline))
         if res[0]:
