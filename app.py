@@ -1,4 +1,5 @@
-from typing import Protocol
+from __future__ import annotations
+from typing import List, Protocol, Tuple
 from flask import Flask, request, Response
 from flask_cors import CORS
 
@@ -26,14 +27,20 @@ portfolio_api_path = "https://sldnph4bq3.execute-api.us-east-1.amazonaws.com/bet
 
 
 class Task(Protocol):
-    async def do(self):
-        ...
-
-    async def undo(self):
-        ...
-
     @property
     def name(self) -> str:
+        ...
+
+    async def do(self) -> bool:
+        ...
+
+    async def undo(self) -> bool:
+        ...
+
+    async def do_async(self, *args, **kwargs) -> bool:
+        ...
+
+    async def undo_async(self, *args, **kwargs) -> bool:
         ...
 
 @dataclass
@@ -50,14 +57,14 @@ class AdjustMoneyManagement:
         method = "addition" if self.amount >= 0 else "deduction"
         body = {"method": method, "money_amount": str(abs(self.amount))}
 
-        return requests.put(user_money_path, json=body)
+        return requests.put(user_money_path, json=body).ok
 
     async def undo(self):
         user_money_path = f"{money_api_path}money/{self.user_id}"
         method = "addition" if self.amount <= 0 else "deduction"
         body = {"method": method, "money_amount": str(abs(self.amount))}
 
-        return requests.put(user_money_path, json=body)
+        return requests.put(user_money_path, json=body).ok
 
     async def do_async(self, session):
         user_money_path = f"{money_api_path}money/{self.user_id}"
@@ -94,7 +101,7 @@ class AdjustInvestmentPortfolio:
             "ticker": self.ticker,
             "quantity": self.quantity,
         }
-        return requests.post(investment_portfolio_path, json=body)
+        return requests.post(investment_portfolio_path, json=body).ok
 
     async def undo(self):
         action = "buy" if self.quantity >= 0 else "sell"
@@ -104,7 +111,7 @@ class AdjustInvestmentPortfolio:
             "ticker": self.ticker,
             "quantity": self.quantity,
         }
-        return requests.post(investment_portfolio_path, json=body)
+        return requests.post(investment_portfolio_path, json=body).ok
 
     async def do_async(self, session):
         action = "sell" if self.quantity >= 0 else "buy"
@@ -130,17 +137,19 @@ class AdjustInvestmentPortfolio:
         async with session.post(investment_portfolio_path, json=body) as resp:
             return resp.ok
 
-async def execute_pipeline_async(pipeline):
+Pipeline = List[Task]
+async def execute_pipeline_async(pipeline: Pipeline) -> Tuple[int, List[str]]:
+    """Returns success_code, failed tasks"""
     async with aiohttp.ClientSession() as session:
         responses = await asyncio.gather(
-            *[asyncio.ensure_future(pipe.do_async(session)) for pipe in pipeline]
+            *[asyncio.ensure_future(task.do_async(session)) for task in pipeline]
         )
         if all(resp for resp in responses):
             return 1, []
         await asyncio.gather(
             *[
-                asyncio.ensure_future(pipe.undo_async(session))
-                for pipe, resp in zip(pipeline, responses)
+                asyncio.ensure_future(task.undo_async(session))
+                for task, resp in zip(pipeline, responses)
                 if resp
             ]
         )
@@ -148,24 +157,25 @@ async def execute_pipeline_async(pipeline):
         return 0, failed_pipes
 
 
-async def execute_pipeline(pipeline):
-    responses = await asyncio.gather(*[pipe.do() for pipe in pipeline])
-    if all(resp.ok for resp in responses):
+async def execute_pipeline(pipeline: Pipeline) -> Tuple[int, List[str]]:
+    """Returns success_code, failed tasks"""
+    responses = await asyncio.gather(*[task.do() for task in pipeline])
+    if all(resp for resp in responses):
         return 1, []
     await asyncio.gather(
-        *[pipe.undo() for pipe, resp in zip(pipeline, responses) if resp.ok]
+        *[task.undo() for task, resp in zip(pipeline, responses) if resp]
     )
-    failed_pipes = [pipe.name for pipe, resp in zip(pipeline, responses) if not resp.ok]
+    failed_pipes = [task.name for task, resp in zip(pipeline, responses) if not resp]
     return 0, failed_pipes
-
 
 @app.route("/stockTransaction", methods=["POST"])
 def transaction():
-    start = time.perf_counter()
+    #start = time.perf_counter()
+    input = request.get_json()
     if request.method == "POST":
         # Gets stock's price and money, verifies transaction is feasible
 
-        input = request.get_json()
+        
         pipeline = []
         if input["transaction_type"] == "BUY":
             pipeline = [
@@ -175,7 +185,7 @@ def transaction():
                 AdjustInvestmentPortfolio(
                     input["user_id"], input["ticker"], input["quantity"]
                 ),
-            ] * 20
+            ]
         elif input["transaction_type"] == "SELL":
             pipeline = [
                 AdjustMoneyManagement(
@@ -184,11 +194,10 @@ def transaction():
                 AdjustInvestmentPortfolio(
                     input["user_id"], input["ticker"], -input["quantity"]
                 ),
-            ] * 20
-
+            ]
         res = asyncio.run(execute_pipeline_async(pipeline))
 
-        print("Executed in time ", time.perf_counter() - start)
+        #print("Executed in time ", time.perf_counter() - start)
         if res[0]:
             return Response(
                 json.dumps({"success": 1}), status=201, content_type="application/json"
