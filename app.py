@@ -218,6 +218,13 @@ def pipeline_for_transaction(input):
 def transaction():
     #start = time.perf_counter()
     input = request.get_json()
+
+    if input is None:
+        return Response(
+            json.dumps({"error": f"No input found"}),
+            status=400,
+            content_type="application/json",
+        )
     if request.method == "POST":
         # Gets stock's price and money, verifies transaction is feasible
 
