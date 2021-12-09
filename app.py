@@ -185,6 +185,35 @@ def index():
         content_type="application/json",
     )
 
+def valid_transaction(atomic_transaction) -> bool:
+    if any(key not in atomic_transaction for key in ("transaction_type", "user_id", "price", "quantity", "ticker")):
+        return False
+    
+    if "transaction_type" not in ("BUY", "SELL"):
+        return False
+    return True
+
+def pipeline_for_transaction(input):
+    pipelines = {
+        "BUY": [
+            AdjustMoneyManagement(
+                input["user_id"], -input["price"] * input["quantity"]
+            ),
+            AdjustInvestmentPortfolio(
+                input["user_id"], input["ticker"], input["quantity"]
+            ),
+        ],
+        "SELL": [
+            AdjustMoneyManagement(
+                input["user_id"], input["price"] * input["quantity"]
+            ),
+            AdjustInvestmentPortfolio(
+                input["user_id"], input["ticker"], -input["quantity"]
+            ),
+        ]
+    }
+    return pipelines[input['transaction_type']]
+
 @app.route("/stockTransaction", methods=["POST"])
 def transaction():
     #start = time.perf_counter()
@@ -192,25 +221,19 @@ def transaction():
     if request.method == "POST":
         # Gets stock's price and money, verifies transaction is feasible
 
+        if isinstance(input, dict):
+            input = [input]
+        
         pipeline = []
-        if input["transaction_type"] == "BUY":
-            pipeline = [
-                AdjustMoneyManagement(
-                    input["user_id"], -input["price"] * input["quantity"]
-                ),
-                AdjustInvestmentPortfolio(
-                    input["user_id"], input["ticker"], input["quantity"]
-                ),
-            ]
-        elif input["transaction_type"] == "SELL":
-            pipeline = [
-                AdjustMoneyManagement(
-                    input["user_id"], input["price"] * input["quantity"]
-                ),
-                AdjustInvestmentPortfolio(
-                    input["user_id"], input["ticker"], -input["quantity"]
-                ),
-            ]
+        for atomic_transaction in input:
+            if not valid_transaction(atomic_transaction):
+                return Response(
+                    json.dumps({"error": f"Invalid transation found"}),
+                    status=400,
+                    content_type="application/json",
+                )
+            pipeline.extend(pipeline_for_transaction(atomic_transaction))
+
         res = asyncio.run(execute_pipeline_async(pipeline))
 
         #print("Executed in time ", time.perf_counter() - start)
