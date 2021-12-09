@@ -23,10 +23,13 @@ CORS(app)
 money_api_path = "https://nz2mapdki5.execute-api.us-east-1.amazonaws.com/beta/"
 portfolio_api_path = "https://sldnph4bq3.execute-api.us-east-1.amazonaws.com/beta/"
 
-#  { “user_id”: “102", “ticker”: “ABC”, “quantity”: 10, “price”: 50.0, “transaction_type”: “BUY” }
-
-
 class Task(Protocol):
+    async def do_async(self, *args, **kwargs) -> bool:
+        ...
+
+    async def undo_async(self, *args, **kwargs) -> bool:
+        ...
+
     @property
     def name(self) -> str:
         ...
@@ -35,12 +38,6 @@ class Task(Protocol):
         ...
 
     async def undo(self) -> bool:
-        ...
-
-    async def do_async(self, *args, **kwargs) -> bool:
-        ...
-
-    async def undo_async(self, *args, **kwargs) -> bool:
         ...
 
 @dataclass
@@ -80,7 +77,7 @@ class AdjustMoneyManagement:
         body = {"method": method, "money_amount": str(abs(self.amount))}
 
         async with session.put(user_money_path, json=body) as resp:
-            return await resp.ok
+            return resp.ok
 
 
 @dataclass
@@ -168,6 +165,26 @@ async def execute_pipeline(pipeline: Pipeline) -> Tuple[int, List[str]]:
     failed_pipes = [task.name for task, resp in zip(pipeline, responses) if not resp]
     return 0, failed_pipes
 
+@app.route("/", methods=["GET"])
+def index():
+    return Response(
+        json.dumps({
+            "message": "Welcome to the async transationc microservice",
+            "links": [
+                {
+                    'rel': 'self',
+                    'href': '/'
+                },
+                {
+                    'rel': 'stock_transaction',
+                    'href': '/stockTransaction'
+                }
+            ]
+        }),
+        status=200,
+        content_type="application/json",
+    )
+
 @app.route("/stockTransaction", methods=["POST"])
 def transaction():
     #start = time.perf_counter()
@@ -175,7 +192,6 @@ def transaction():
     if request.method == "POST":
         # Gets stock's price and money, verifies transaction is feasible
 
-        
         pipeline = []
         if input["transaction_type"] == "BUY":
             pipeline = [
