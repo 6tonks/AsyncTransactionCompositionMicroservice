@@ -189,7 +189,7 @@ def valid_transaction(atomic_transaction) -> bool:
     if any(key not in atomic_transaction for key in ("transaction_type", "user_id", "price", "quantity", "ticker")):
         return False
     
-    if "transaction_type" not in ("BUY", "SELL"):
+    if atomic_transaction["transaction_type"] not in ("BUY", "SELL"):
         return False
     return True
 
